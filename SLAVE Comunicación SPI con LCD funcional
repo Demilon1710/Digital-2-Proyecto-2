@@ -1,0 +1,127 @@
+#include <Arduino.h>
+#include <ESP32SPISlave.h>
+#include "Wire.h"
+#include <stdint.h>
+#include <LiquidCrystal.h>
+
+#define LEDB 4
+#define LEDY 22
+#define LEDR 21
+#define rs 32
+#define en 33
+#define d4 25
+#define d5 26
+#define d6 27
+#define d7 15
+#define pot1 14
+
+#define QUEUE_SIZE 1
+
+int raw; //Variable para el ADC crudo del potenciómetro 1
+float vbit; //Variable para el resultado de la conversión del ADC a voltaje
+
+LiquidCrystal lcd(rs,en,d4,d5,d6,d7); 
+
+ESP32SPISlave slave;
+
+static constexpr size_t BUFFER_SIZE = 8;
+uint8_t tx_buf[BUFFER_SIZE]{0};
+uint8_t rx_buf[BUFFER_SIZE]{0};
+
+uint8_t subCmd;
+uint8_t diezmilesima;
+uint8_t milesima;
+uint8_t centena;
+uint8_t decena;
+uint8_t unidad;
+
+// put function declarations here:
+
+
+void setup() {
+  Serial.begin(115200);
+  lcd.begin(16,2); //Columnas y filas a utilizar
+
+  lcd.clear(); //Limpiar cualquier dato guardado al inicializar el LCD
+
+  lcd.setCursor(0,0); //Imprimir a partir de la primera columna en la primera fila
+  lcd.print("PotB:");
+
+  lcd.setCursor(5,0); //Imprimir a partir de la quinta columna en la primera fila
+  lcd.print("PotV:");
+
+  lcd.setCursor(11,0); //Imprimir a partir de la undécima columna en la primera fila
+  lcd.print("LED:");
+  
+  pinMode(LEDB, OUTPUT);
+  pinMode(LEDY, OUTPUT);
+  pinMode(LEDR, OUTPUT);
+  slave.setDataMode(SPI_MODE0);
+  slave.setQueueSize(QUEUE_SIZE);
+
+  slave.begin(VSPI);
+
+  memset(tx_buf, 0, BUFFER_SIZE);
+
+  slave.queue(tx_buf, rx_buf, BUFFER_SIZE);
+  slave.trigger();
+}
+
+void loop() {
+  // put your main code here, to run repeatedly:
+  raw = analogRead(pot1); //Lecturas analógicas de los potenciómetros
+
+  vbit = (raw*3.3)/4095; //Conversión de bits a voltaje
+
+  lcd.setCursor(0,1);
+  lcd.print("    "); //"Limpiar" valores que se sobrepasen al reducir el número
+  delay(10);
+  lcd.setCursor(0,1);
+  lcd.print(raw); //Imprimir la variable en el LCD
+  delay(10);
+
+  lcd.setCursor(5,1);
+  lcd.print("    ");
+  delay(10);
+  lcd.setCursor(5,1);
+  lcd.print(vbit);
+  delay(10);
+
+ 
+  if(slave.hasTransactionsCompletedAndAllResultsReady(QUEUE_SIZE)){
+    size_t received_bytes = slave.numBytesReceived();
+
+   // if(received_bytes >= 6){
+      uint8_t scmd = rx_buf[0];
+      uint8_t dmil = rx_buf[1];
+      uint8_t mil = rx_buf[2];
+      uint8_t cen = rx_buf[3];
+      uint8_t dec = rx_buf[4];
+      uint8_t uni = rx_buf[5];
+
+      uint32_t valor = dmil*10000 + mil*1000 + cen*100 + dec*10 + uni*1;
+
+      switch(scmd){
+        case 1:
+          digitalWrite(LEDB, HIGH);
+          delay(valor);
+          digitalWrite(LEDB, LOW);
+          break;
+        case 2:
+          digitalWrite(LEDY, HIGH);
+          delay(valor);
+          digitalWrite(LEDY, LOW);
+          break;
+        case 3:
+          digitalWrite(LEDR, HIGH);
+          delay(valor);
+          digitalWrite(LEDR, LOW);
+          break;
+      }
+      tx_buf[0] = 0xAA;
+    //}
+    memset(rx_buf, 0, BUFFER_SIZE);
+    slave.queue(tx_buf, rx_buf, BUFFER_SIZE);
+    slave.trigger();
+  }
+}
