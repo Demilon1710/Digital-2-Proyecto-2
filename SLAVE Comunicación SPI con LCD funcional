@@ -5,26 +5,29 @@
 #include <LiquidCrystal.h>
 
 #define LEDB 4
-#define LEDY 22
-#define LEDR 21
+#define LEDY 14
+#define LEDR 2
 #define rs 32
 #define en 33
 #define d4 25
 #define d5 26
 #define d6 27
 #define d7 15
-#define pot1 14
+#define pot1 34
 
 #define QUEUE_SIZE 1
 
+#define I2C_DEV_ADDR 0x55 //Identidad indicada para el STE
+
 int raw; //Variable para el ADC crudo del potenciómetro 1
 float vbit; //Variable para el resultado de la conversión del ADC a voltaje
+volatile bool sendValue = false; //Variable de cambio de estado
 
-LiquidCrystal lcd(rs,en,d4,d5,d6,d7); 
+LiquidCrystal lcd(rs,en,d4,d5,d6,d7); //Setup para el LCD
 
-ESP32SPISlave slave;
+ESP32SPISlave slave; //Declarar el ESP32 como el esclavo
 
-static constexpr size_t BUFFER_SIZE = 8;
+static constexpr size_t BUFFER_SIZE = 8; //Tamaño para recibir 8 bits
 uint8_t tx_buf[BUFFER_SIZE]{0};
 uint8_t rx_buf[BUFFER_SIZE]{0};
 
@@ -36,7 +39,9 @@ uint8_t decena;
 uint8_t unidad;
 
 // put function declarations here:
-
+//Funciones para setup de I2C
+void onRequest();
+void onReceive(int len);
 
 void setup() {
   Serial.begin(115200);
@@ -53,18 +58,23 @@ void setup() {
   lcd.setCursor(11,0); //Imprimir a partir de la undécima columna en la primera fila
   lcd.print("LED:");
   
-  pinMode(LEDB, OUTPUT);
+  pinMode(LEDB, OUTPUT); //Configuración para pines de los LEDs
   pinMode(LEDY, OUTPUT);
   pinMode(LEDR, OUTPUT);
-  slave.setDataMode(SPI_MODE0);
+  slave.setDataMode(SPI_MODE0); //Configuración para SPI
   slave.setQueueSize(QUEUE_SIZE);
 
   slave.begin(VSPI);
 
-  memset(tx_buf, 0, BUFFER_SIZE);
+  memset(tx_buf, 0, BUFFER_SIZE); //Limpiar el dato para repetir ciclos
 
-  slave.queue(tx_buf, rx_buf, BUFFER_SIZE);
+  slave.queue(tx_buf, rx_buf, BUFFER_SIZE); //Transmitir y recibir dato
   slave.trigger();
+
+  Serial.setDebugOutput(true); //Configuración de I2C
+  Wire.onReceive(onReceive);
+  Wire.onRequest(onRequest);
+  Wire.begin((uint8_t)I2C_DEV_ADDR);
 }
 
 void loop() {
@@ -83,15 +93,15 @@ void loop() {
   lcd.setCursor(5,1);
   lcd.print("    ");
   delay(10);
+
   lcd.setCursor(5,1);
   lcd.print(vbit);
   delay(10);
 
- 
+ //Transacciones recibidas del maestro
   if(slave.hasTransactionsCompletedAndAllResultsReady(QUEUE_SIZE)){
     size_t received_bytes = slave.numBytesReceived();
 
-   // if(received_bytes >= 6){
       uint8_t scmd = rx_buf[0];
       uint8_t dmil = rx_buf[1];
       uint8_t mil = rx_buf[2];
@@ -106,22 +116,58 @@ void loop() {
           digitalWrite(LEDB, HIGH);
           delay(valor);
           digitalWrite(LEDB, LOW);
+          lcd.setCursor(11,1);
+          lcd.print("    ");
+          delay(10);
+          lcd.setCursor(11,1);
+          lcd.print("B");
+          delay(10);
           break;
         case 2:
           digitalWrite(LEDY, HIGH);
           delay(valor);
           digitalWrite(LEDY, LOW);
+          lcd.setCursor(11,1);
+          lcd.print("    ");
+          delay(10);
+          lcd.setCursor(11,1);
+          lcd.print("Y");
+          delay(10);
           break;
         case 3:
           digitalWrite(LEDR, HIGH);
           delay(valor);
           digitalWrite(LEDR, LOW);
+          lcd.setCursor(11,1);
+          lcd.print("    ");
+          delay(10);
+          lcd.setCursor(11,1);
+          lcd.print("R");
+          delay(10);
           break;
       }
-      tx_buf[0] = 0xAA;
-    //}
+
+      tx_buf[0] = 0xAA; //Transmitir al maestro
+
     memset(rx_buf, 0, BUFFER_SIZE);
     slave.queue(tx_buf, rx_buf, BUFFER_SIZE);
     slave.trigger();
+  }
+}
+
+// put function definitions here:
+void onReceive(int len){
+while(Wire.available()){
+  uint8_t incomingByte = Wire.read();
+  if(incomingByte == '2'){
+    sendValue = true;
+  }
+}
+}
+
+void onRequest(){
+  if(sendValue){
+    Wire.print(raw);
+    sendValue = false;
   }
 }
